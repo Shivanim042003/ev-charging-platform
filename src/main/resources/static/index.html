@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EV Charging Reservations</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mut:#667085;--line:#e4e7ec;--acc:#0b7a5b;--bad:#b42318;--ok:#067647}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1317;--card:#171c22;--ink:#e8ecf1;--mut:#98a2b3;--line:#27303a;--acc:#34d399;--bad:#f97066;--ok:#47cd89}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,Segoe UI,sans-serif}
+header{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0}header .pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:1fr 1fr}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+section.wide{grid-column:1/-1}
+h2{font-size:15px;margin:0 0 10px}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 2px}
+input,select,button{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+input{width:100%}button{cursor:pointer;background:var(--acc);color:#fff;border:0}
+button.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.row>*{flex:1;min-width:110px}.row>button{flex:0 0 auto}
+ul{list-style:none;margin:8px 0 0;padding:0}li{padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+li.sel{border-color:var(--acc)}li small{color:var(--mut);display:block}
+.tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line)}
+.CONFIRMED,.ACTIVE{color:var(--ok)}.CANCELLED,.INACTIVE{color:var(--mut)}
+#log{font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;max-height:220px;overflow:auto}
+.err{color:var(--bad)}.ok{color:var(--ok)}
+.stat{display:flex;gap:18px;margin-top:10px;font-size:14px}.stat b{font-size:22px;display:block}
+</style>
+</head>
+<body>
+<header><h1>EV Charging Reservations</h1><span class="pill" id="health">checking...</span><span class="pill">all times UTC</span></header>
+<main>
+<section>
+  <h2>1. Stations</h2>
+  <div class="row"><div><label>Name</label><input id="sName" value="Downtown Hub"></div><div><label>Address</label><input id="sAddr" value="1 Main St"></div></div>
+  <div class="row"><div><label>Latitude</label><input id="sLat" value="44.9778"></div><div><label>Longitude</label><input id="sLng" value="-93.265"></div><button id="addStation">Add station</button></div>
+  <div class="row" style="margin-top:10px"><div><label>Nearby: radius km</label><input id="rad" value="10"></div><button class="sec" id="nearby">Search near lat/lng above</button><button class="sec" id="allSt">Show all</button></div>
+  <ul id="stations"></ul>
+</section>
+<section>
+  <h2>2. Connectors <span id="selName" class="tag">select a station</span></h2>
+  <div class="row"><div><label>Connector #</label><input id="cNum" value="A1"></div><div><label>Power kW</label><input id="cKw" value="150"></div><button id="addConn">Add connector</button></div>
+  <ul id="connectors"></ul>
+</section>
+<section>
+  <h2>3. Book a slot</h2>
+  <div class="row"><div><label>Your user ref</label><input id="user" value="shivani"></div></div>
+  <div class="row"><div><label>Start (UTC)</label><input id="start" type="datetime-local"></div><div><label>Hours</label><input id="hrs" value="1"></div></div>
+  <div class="row" style="margin-top:10px"><button id="book">Book selected connector</button><button class="sec" id="race">Race: 50 users, same slot</button></div>
+  <div id="raceOut" class="stat" hidden></div>
+</section>
+<section>
+  <h2>4. My reservations</h2>
+  <button class="sec" id="refresh">Refresh</button>
+  <ul id="resv"></ul>
+</section>
+<section class="wide"><h2>Activity log</h2><div id="log"></div></section>
+</main>
+<script>
+const API='/api/v1';let selSt=null,selCn=null;
+const $=id=>document.getElementById(id);
+function log(msg,cls){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=new Date().toLocaleTimeString()+'  '+msg;$('log').prepend(d)}
+async function call(method,path,body){
+  const r=await fetch(API+path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+  let data=null;try{data=await r.json()}catch(e){}
+  if(!r.ok){const m=(data&&(data.detail||data.title))||r.statusText;const e=new Error(r.status+' '+m);e.status=r.status;throw e}
+  return data}
+const iso=d=>d.toISOString().replace(/\.\d+Z$/,'Z');
+function slot(){const v=$('start').value;if(!v)throw new Error('pick a start time');
+  const s=new Date(v+':00Z');const e=new Date(s.getTime()+parseFloat($('hrs').value)*3600000);return{startTime:iso(s),endTime:iso(e)}}
+function setDefaultStart(){const d=new Date(Date.now()+3*86400000);d.setUTCHours(15,0,0,0);$('start').value=d.toISOString().slice(0,16)}
+async function health(){try{const h=await (await fetch('/actuator/health')).json();$('health').textContent='app '+h.status;$('health').className='pill '+(h.status==='UP'?'ok':'err')}catch(e){$('health').textContent='app down';$('health').className='pill err'}}
+function render(list,el,fn){el.innerHTML='';list.forEach(x=>el.appendChild(fn(x)))}
+async function loadStations(path='/stations'){
+  try{const l=await call('GET',path);render(l,$('stations'),s=>{const li=document.createElement('li');if(selSt&&selSt.id===s.id)li.className='sel';
+    li.innerHTML=`<div><b></b><small></small></div><span class="tag ${s.status}">${s.status}</span>`;li.querySelector('b').textContent=s.name;
+    li.querySelector('small').textContent=`${s.address} \u00b7 ${s.latitude??'?'}, ${s.longitude??'?'}${s.distanceKm!=null?' \u00b7 '+s.distanceKm+' km':''}`;
+    li.onclick=()=>{selSt=s;selCn=null;$('selName').textContent=s.name;loadStations(path);loadConnectors()};return li});
+    if(!l.length)$('stations').innerHTML='<li>No stations</li>'}catch(e){log(e.message,'err')}}
+async function loadConnectors(){
+  if(!selSt){$('connectors').innerHTML='';return}
+  try{const l=await call('GET',`/stations/${selSt.id}/connectors`);render(l,$('connectors'),c=>{const li=document.createElement('li');if(selCn&&selCn.id===c.id)li.className='sel';
+    li.innerHTML=`<div><b></b><small></small></div><span class="tag ${c.status}">${c.status}</span>`;li.querySelector('b').textContent='Connector '+c.connectorNumber;
+    li.querySelector('small').textContent=c.powerKw+' kW';li.onclick=()=>{selCn=c;loadConnectors()};return li});
+    if(!l.length)$('connectors').innerHTML='<li>No connectors yet</li>'}catch(e){log(e.message,'err')}}
+async function loadResv(){
+  try{const l=await call('GET','/reservations?userRef='+encodeURIComponent($('user').value));
+    render(l,$('resv'),r=>{const li=document.createElement('li');
+      li.innerHTML=`<div><b></b><small></small></div><span><span class="tag ${r.status}">${r.status}</span> </span>`;
+      li.querySelector('b').textContent=r.startTime.replace('T',' ').replace('Z',' UTC')+' \u2192 '+r.endTime.slice(11,16);
+      li.querySelector('small').textContent=`$${r.quotedPricePerKwh}/kWh \u00b7 ${r.id.slice(0,8)}`;
+      if(r.status==='CONFIRMED'){const b=document.createElement('button');b.className='sec';b.textContent='Cancel';
+        b.onclick=async()=>{try{await call('PATCH',`/reservations/${r.id}/cancel`);log('Cancelled '+r.id.slice(0,8),'ok');loadResv()}catch(e){log(e.message,'err')}};li.lastChild.appendChild(b)}
+      return li});if(!l.length)$('resv').innerHTML='<li>None for this user</li>'}catch(e){log(e.message,'err')}}
+$('addStation').onclick=async()=>{try{const s=await call('POST','/stations',{name:$('sName').value,address:$('sAddr').value,latitude:parseFloat($('sLat').value),longitude:parseFloat($('sLng').value)});
+  log('Station created: '+s.name,'ok');selSt=s;$('selName').textContent=s.name;loadStations();loadConnectors()}catch(e){log(e.message,'err')}};
+$('nearby').onclick=()=>loadStations(`/stations/nearby?lat=${$('sLat').value}&lng=${$('sLng').value}&radiusKm=${$('rad').value}`);
+$('allSt').onclick=()=>loadStations();
+$('addConn').onclick=async()=>{if(!selSt)return log('select a station first','err');
+  try{const c=await call('POST',`/stations/${selSt.id}/connectors`,{connectorNumber:$('cNum').value,powerKw:parseFloat($('cKw').value)});log('Connector '+c.connectorNumber+' added','ok');selCn=c;loadConnectors()}catch(e){log(e.message,'err')}};
+$('book').onclick=async()=>{if(!selCn)return log('select a connector first','err');
+  try{const r=await call('POST','/reservations',{connectorId:selCn.id,userRef:$('user').value,...slot()});
+    log(`Booked ${r.startTime} at $${r.quotedPricePerKwh}/kWh (Kafka notification fires async)`,'ok');loadResv()}catch(e){log(e.message,'err')}};
+$('race').onclick=async()=>{if(!selCn)return log('select a connector first','err');
+  let t;try{t=slot()}catch(e){return log(e.message,'err')}
+  $('race').disabled=true;const out=$('raceOut');out.hidden=false;out.textContent='racing\u2026';
+  const calls=Array.from({length:50},(_,i)=>call('POST','/reservations',{connectorId:selCn.id,userRef:'racer-'+i,...t}).then(()=>'ok',e=>e.status===409?'conflict':'other'));
+  const res=await Promise.all(calls);const n=k=>res.filter(x=>x===k).length;
+  out.innerHTML=`<div><b class="ok">${n('ok')}</b>confirmed</div><div><b class="err">${n('conflict')}</b>rejected (409)</div><div><b>${n('other')}</b>other</div>`;
+  log(`Race: 50 simultaneous requests \u2192 ${n('ok')} confirmed, ${n('conflict')} conflicts`,n('ok')===1?'ok':'err');$('race').disabled=false;
+  };
+$('refresh').onclick=loadResv;
+setDefaultStart();health();setInterval(health,10000);loadStations();loadResv();
+</script>
+</body>
+</html>

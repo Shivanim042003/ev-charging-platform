@@ -103,12 +103,26 @@ public class ReservationService {
         return Duration.between(clippedStart, clippedEnd).toMinutes() / 60.0;
     }
 
+    /**
+     * Cancels a reservation only if it belongs to ownerRef. Someone else's reservation is reported
+     * as not found, so its existence is not revealed. Runs in one transaction.
+     */
+    @Transactional
+    public ReservationResponse cancel(UUID reservationId, String ownerRef) {
+        Reservation reservation = reservationRepository.findByIdAndUserRef(reservationId, ownerRef)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId));
+        return cancelEntity(reservation);
+    }
+
     /** Idempotent: cancelling an already cancelled reservation changes nothing and emits no event. */
     @Transactional
     public ReservationResponse cancel(UUID reservationId) {
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new ReservationNotFoundException(reservationId));
+        return cancelEntity(reservation);
+    }
 
+    private ReservationResponse cancelEntity(Reservation reservation) {
         if (reservation.getStatus() == ReservationStatus.CANCELLED) {
             return ReservationResponse.from(reservation);
         }

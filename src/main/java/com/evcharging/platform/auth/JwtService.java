@@ -15,6 +15,8 @@ import java.time.temporal.ChronoUnit;
 @Service
 public class JwtService {
 
+    public static final String ISSUER = "ev-charging-platform";
+
     private final JwtEncoder encoder;
     private final long ttlMinutes;
 
@@ -26,7 +28,7 @@ public class JwtService {
     public String issue(AppUser user) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer("ev-charging-platform")
+                .issuer(ISSUER)
                 .subject(user.getUsername())
                 .issuedAt(now)
                 .expiresAt(now.plus(ttlMinutes, ChronoUnit.MINUTES))

@@ -31,7 +31,7 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<Object> register(@Valid @RequestBody AuthRequest request) {
+    public ResponseEntity<Object> register(@Valid @RequestBody RegisterRequest request) {
         String username = request.username().toLowerCase(Locale.ROOT);
         if (users.existsByUsername(username)) {
             return problem(HttpStatus.CONFLICT, "Username already taken");
@@ -41,7 +41,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Object> login(@Valid @RequestBody AuthRequest request) {
+    public ResponseEntity<Object> login(@Valid @RequestBody LoginRequest request) {
         String username = request.username().toLowerCase(Locale.ROOT);
         AppUser user = users.findByUsername(username).orElse(null);
         boolean ok = passwordEncoder.matches(request.password(), user != null ? user.getPasswordHash() : dummyHash);

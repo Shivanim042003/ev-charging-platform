@@ -4,6 +4,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -50,13 +53,27 @@ public class SecurityConfig {
     }
 
     @Bean
-    JwtEncoder jwtEncoder(@Value("${app.jwt.secret}") String secret) {
+    JwtEncoder jwtEncoder(@Value("${app.jwt.secret}") String secret, Environment env) {
+        rejectDevSecretInProd(secret, env);
         return new NimbusJwtEncoder(new ImmutableSecret<>(key(secret)));
     }
 
     @Bean
-    JwtDecoder jwtDecoder(@Value("${app.jwt.secret}") String secret) {
-        return NimbusJwtDecoder.withSecretKey(key(secret)).macAlgorithm(MacAlgorithm.HS256).build();
+    JwtDecoder jwtDecoder(@Value("${app.jwt.secret}") String secret, Environment env) {
+        rejectDevSecretInProd(secret, env);
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key(secret))
+                .macAlgorithm(MacAlgorithm.HS256).build();
+        // Default validators (expiry / not-before) plus: the token must have been issued by us.
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(JwtService.ISSUER));
+        return decoder;
+    }
+
+    /** The committed development secrets are public, so refuse to start with one under the "prod" profile. */
+    private static void rejectDevSecretInProd(String secret, Environment env) {
+        boolean devSecret = secret.startsWith("local-dev-only") || secret.startsWith("docker-dev-only");
+        if (devSecret && env.acceptsProfiles(Profiles.of("prod"))) {
+            throw new IllegalStateException("Set JWT_SECRET to a private random value before running with the prod profile");
+        }
     }
 
     private static SecretKey key(String secret) {

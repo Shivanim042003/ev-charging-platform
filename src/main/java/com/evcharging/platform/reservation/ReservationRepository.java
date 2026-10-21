@@ -6,11 +6,15 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ReservationRepository extends JpaRepository<Reservation, UUID> {
 
     List<Reservation> findByUserRefOrderByStartTimeDesc(String userRef);
+
+    /** Owner-scoped lookup: empty unless the reservation exists AND belongs to userRef. */
+    Optional<Reservation> findByIdAndUserRef(UUID id, String userRef);
 
     boolean existsByConnector_IdAndStatusAndStartTimeLessThanAndEndTimeGreaterThan(
             UUID connectorId,

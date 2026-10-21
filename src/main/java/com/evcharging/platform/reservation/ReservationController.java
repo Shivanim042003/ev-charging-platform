@@ -39,13 +39,8 @@ public class ReservationController {
 
     @PatchMapping("/{id}/cancel")
     public ReservationResponse cancel(@PathVariable UUID id, Principal principal) {
-        boolean mine = reservationService.listForUser(principal.getName()).stream()
-                .anyMatch(r -> r.id().equals(id));
-        if (!mine) {
-            // Someone else's reservation looks exactly like one that does not exist.
-            throw new ReservationNotFoundException(id);
-        }
-        return reservationService.cancel(id);
+        // Ownership is enforced inside the service query; another user's reservation looks like a 404.
+        return reservationService.cancel(id, principal.getName());
     }
 
     @GetMapping

@@ -124,3 +124,38 @@ src/main/resources/db/migration   Flyway V1-V6
 - Outbox delivery is at-least-once, not exactly-once.
 - Prices are quotes stored on the reservation; there is no payment or metering.
 - The Maven wrapper is not included; use an installed Maven or run `mvn wrapper:wrapper`.
+
+## Local setup
+
+1. Copy the example environment file:
+
+```powershell
+   Copy-Item .env.example .env
+```
+
+2. Generate the two secrets and fill them in (Windows PowerShell 5.1 or later):
+
+```powershell
+   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+   $bytes = New-Object byte[] 48
+   $rng.GetBytes($bytes); $jwtSecret  = [Convert]::ToBase64String($bytes)
+   $rng.GetBytes($bytes); $dbPassword = [BitConverter]::ToString($bytes).Replace("-", "")
+   $rng.Dispose()
+
+   (Get-Content .env) `
+     -replace '^JWT_SECRET=.*',        "JWT_SECRET=$jwtSecret" `
+     -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$dbPassword" |
+     Set-Content .env -Encoding ascii
+```
+
+3. Start the stack:
+
+```powershell
+   docker compose up --build
+```
+
+4. Check that the app is healthy: <http://localhost:8081/actuator/health> (the port may differ if you use a different compose project setup).
+
+`.env` is gitignored and must never be committed. `docker compose` refuses to start if `JWT_SECRET`, `POSTGRES_DB`, `POSTGRES_USER` or `POSTGRES_PASSWORD` is missing.
+
+Tests run with `mvn test` and need no extra setup; a test-only JWT secret is configured in `pom.xml`. Docker must be running, because the tests start their own Postgres through Testcontainers.

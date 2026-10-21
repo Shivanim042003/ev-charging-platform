@@ -3,25 +3,23 @@ package com.evcharging.platform.reservation;
 import com.evcharging.platform.reservation.dto.CreateReservationRequest;
 import com.evcharging.platform.reservation.dto.ReservationResponse;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
 
+/** Every endpoint acts on behalf of the authenticated user; the owner always comes from the token. */
 @RestController
 @RequestMapping("/api/v1/reservations")
-@Validated
 public class ReservationController {
 
     private final ReservationService reservationService;
@@ -32,17 +30,26 @@ public class ReservationController {
 
     @PostMapping
     public ResponseEntity<ReservationResponse> create(
-            @Valid @RequestBody CreateReservationRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(reservationService.create(request));
+            @Valid @RequestBody CreateReservationRequest request, Principal principal) {
+        // Any userRef in the body is ignored: a user can only book for themselves.
+        CreateReservationRequest owned = new CreateReservationRequest(
+                request.connectorId(), principal.getName(), request.startTime(), request.endTime());
+        return ResponseEntity.status(HttpStatus.CREATED).body(reservationService.create(owned));
     }
 
     @PatchMapping("/{id}/cancel")
-    public ReservationResponse cancel(@PathVariable UUID id) {
+    public ReservationResponse cancel(@PathVariable UUID id, Principal principal) {
+        boolean mine = reservationService.listForUser(principal.getName()).stream()
+                .anyMatch(r -> r.id().equals(id));
+        if (!mine) {
+            // Someone else's reservation looks exactly like one that does not exist.
+            throw new ReservationNotFoundException(id);
+        }
         return reservationService.cancel(id);
     }
 
     @GetMapping
-    public List<ReservationResponse> listForUser(@RequestParam @NotBlank String userRef) {
-        return reservationService.listForUser(userRef);
+    public List<ReservationResponse> mine(Principal principal) {
+        return reservationService.listForUser(principal.getName());
     }
 }

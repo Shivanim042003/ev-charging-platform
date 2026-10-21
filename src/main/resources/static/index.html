@@ -30,8 +30,15 @@ li.sel{border-color:var(--acc)}li small{color:var(--mut);display:block}
 </style>
 </head>
 <body>
-<header><h1>EV Charging Reservations</h1><span class="pill" id="health">checking...</span><span class="pill">all times UTC</span></header>
+<header><h1>EV Charging Reservations</h1><span class="pill" id="health">checking...</span><span class="pill">all times UTC</span><span class="pill" id="who" hidden></span><button class="sec" id="logout" hidden>Log out</button></header>
 <main>
+<section class="wide" id="authBox">
+  <h2>Account</h2>
+  <div class="row"><div><label>Username</label><input id="aUser" autocomplete="username" placeholder="3-50 letters/digits"></div>
+  <div><label>Password (min 8)</label><input id="aPass" type="password" autocomplete="current-password"></div>
+  <button id="login">Log in</button><button class="sec" id="register">Register</button></div>
+  <small style="color:var(--mut)">Stations are public to read. Creating stations and connectors, booking and cancelling need a login.</small>
+</section>
 <section>
   <h2>1. Stations</h2>
   <div class="row"><div><label>Name</label><input id="sName" value="Downtown Hub"></div><div><label>Address</label><input id="sAddr" value="1 Main St"></div></div>
@@ -46,25 +53,30 @@ li.sel{border-color:var(--acc)}li small{color:var(--mut);display:block}
 </section>
 <section>
   <h2>3. Book a slot</h2>
-  <div class="row"><div><label>Your user ref</label><input id="user" value="shivani"></div></div>
   <div class="row"><div><label>Start (UTC)</label><input id="start" type="datetime-local"></div><div><label>Hours</label><input id="hrs" value="1"></div></div>
-  <div class="row" style="margin-top:10px"><button id="book">Book selected connector</button><button class="sec" id="race">Race: 50 users, same slot</button></div>
+  <div class="row" style="margin-top:10px"><button id="book">Book selected connector</button><button class="sec" id="race">Race: 50 simultaneous bookings</button></div>
   <div id="raceOut" class="stat" hidden></div>
 </section>
 <section>
-  <h2>4. My reservations</h2>
+  <h2>4. My reservations <span class="tag" id="mine"></span></h2>
   <button class="sec" id="refresh">Refresh</button>
   <ul id="resv"></ul>
 </section>
 <section class="wide"><h2>Activity log</h2><div id="log"></div></section>
 </main>
 <script>
-const API='/api/v1';let selSt=null,selCn=null;
 const $=id=>document.getElementById(id);
+const API='/api/v1';let selSt=null,selCn=null,token=null,me=null;
+try{token=localStorage.getItem('ev_token');me=localStorage.getItem('ev_user')}catch(e){}
+function saveAuth(t,u){token=t;me=u;try{if(t){localStorage.setItem('ev_token',t);localStorage.setItem('ev_user',u)}else{localStorage.removeItem('ev_token');localStorage.removeItem('ev_user')}}catch(e){}renderAuth()}
+function renderAuth(){const on=!!token;$('authBox').hidden=on;$('who').hidden=!on;$('logout').hidden=!on;$('who').textContent=on?'signed in: '+me:'';$('mine').textContent=on?me:'';
+  if(!on)$('resv').innerHTML='<li>Log in to see your reservations</li>'}
 function log(msg,cls){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=new Date().toLocaleTimeString()+'  '+msg;$('log').prepend(d)}
 async function call(method,path,body){
-  const r=await fetch(API+path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+  const h={};if(body)h['Content-Type']='application/json';if(token)h['Authorization']='Bearer '+token;
+  const r=await fetch(API+path,{method,headers:h,body:body?JSON.stringify(body):undefined});
   let data=null;try{data=await r.json()}catch(e){}
+  if(r.status===401&&!path.startsWith('/auth/')){if(token)saveAuth(null,null);const e=new Error('Please log in first');e.status=401;throw e}
   if(!r.ok){const m=(data&&(data.detail||data.title))||r.statusText;const e=new Error(r.status+' '+m);e.status=r.status;throw e}
   return data}
 const iso=d=>d.toISOString().replace(/\.\d+Z$/,'Z');
@@ -86,14 +98,15 @@ async function loadConnectors(){
     li.querySelector('small').textContent=c.powerKw+' kW';li.onclick=()=>{selCn=c;loadConnectors()};return li});
     if(!l.length)$('connectors').innerHTML='<li>No connectors yet</li>'}catch(e){log(e.message,'err')}}
 async function loadResv(){
-  try{const l=await call('GET','/reservations?userRef='+encodeURIComponent($('user').value));
+  if(!token)return;
+  try{const l=await call('GET','/reservations');
     render(l,$('resv'),r=>{const li=document.createElement('li');
       li.innerHTML=`<div><b></b><small></small></div><span><span class="tag ${r.status}">${r.status}</span> </span>`;
       li.querySelector('b').textContent=r.startTime.replace('T',' ').replace('Z',' UTC')+' \u2192 '+r.endTime.slice(11,16);
       li.querySelector('small').textContent=`$${r.quotedPricePerKwh}/kWh \u00b7 ${r.id.slice(0,8)}`;
       if(r.status==='CONFIRMED'){const b=document.createElement('button');b.className='sec';b.textContent='Cancel';
         b.onclick=async()=>{try{await call('PATCH',`/reservations/${r.id}/cancel`);log('Cancelled '+r.id.slice(0,8),'ok');loadResv()}catch(e){log(e.message,'err')}};li.lastChild.appendChild(b)}
-      return li});if(!l.length)$('resv').innerHTML='<li>None for this user</li>'}catch(e){log(e.message,'err')}}
+      return li});if(!l.length)$('resv').innerHTML='<li>No reservations yet</li>'}catch(e){log(e.message,'err')}}
 $('addStation').onclick=async()=>{try{const s=await call('POST','/stations',{name:$('sName').value,address:$('sAddr').value,latitude:parseFloat($('sLat').value),longitude:parseFloat($('sLng').value)});
   log('Station created: '+s.name,'ok');selSt=s;$('selName').textContent=s.name;loadStations();loadConnectors()}catch(e){log(e.message,'err')}};
 $('nearby').onclick=()=>loadStations(`/stations/nearby?lat=${$('sLat').value}&lng=${$('sLng').value}&radiusKm=${$('rad').value}`);
@@ -101,18 +114,25 @@ $('allSt').onclick=()=>loadStations();
 $('addConn').onclick=async()=>{if(!selSt)return log('select a station first','err');
   try{const c=await call('POST',`/stations/${selSt.id}/connectors`,{connectorNumber:$('cNum').value,powerKw:parseFloat($('cKw').value)});log('Connector '+c.connectorNumber+' added','ok');selCn=c;loadConnectors()}catch(e){log(e.message,'err')}};
 $('book').onclick=async()=>{if(!selCn)return log('select a connector first','err');
-  try{const r=await call('POST','/reservations',{connectorId:selCn.id,userRef:$('user').value,...slot()});
+  try{const r=await call('POST','/reservations',{connectorId:selCn.id,...slot()});
     log(`Booked ${r.startTime} at $${r.quotedPricePerKwh}/kWh (Kafka notification fires async)`,'ok');loadResv()}catch(e){log(e.message,'err')}};
 $('race').onclick=async()=>{if(!selCn)return log('select a connector first','err');
   let t;try{t=slot()}catch(e){return log(e.message,'err')}
   $('race').disabled=true;const out=$('raceOut');out.hidden=false;out.textContent='racing\u2026';
-  const calls=Array.from({length:50},(_,i)=>call('POST','/reservations',{connectorId:selCn.id,userRef:'racer-'+i,...t}).then(()=>'ok',e=>e.status===409?'conflict':'other'));
+  const calls=Array.from({length:50},(_,i)=>call('POST','/reservations',{connectorId:selCn.id,...t}).then(()=>'ok',e=>e.status===409?'conflict':'other'));
   const res=await Promise.all(calls);const n=k=>res.filter(x=>x===k).length;
   out.innerHTML=`<div><b class="ok">${n('ok')}</b>confirmed</div><div><b class="err">${n('conflict')}</b>rejected (409)</div><div><b>${n('other')}</b>other</div>`;
   log(`Race: 50 simultaneous requests \u2192 ${n('ok')} confirmed, ${n('conflict')} conflicts`,n('ok')===1?'ok':'err');$('race').disabled=false;
   };
 $('refresh').onclick=loadResv;
-setDefaultStart();health();setInterval(health,10000);loadStations();loadResv();
+async function doAuth(path){const u=$('aUser').value.trim(),p=$('aPass').value;
+  try{if(path==='register'){await call('POST','/auth/register',{username:u,password:p});log('Registered '+u.toLowerCase(),'ok')}
+    const t=await call('POST','/auth/login',{username:u,password:p});saveAuth(t.token,t.username);$('aPass').value='';log('Logged in as '+t.username,'ok');loadResv()}
+  catch(e){log(e.message,'err')}}
+$('login').onclick=()=>doAuth('login');$('register').onclick=()=>doAuth('register');
+$('aPass').onkeydown=e=>{if(e.key==='Enter')doAuth('login')};
+$('logout').onclick=()=>{saveAuth(null,null);log('Logged out')};
+renderAuth();setDefaultStart();health();setInterval(health,10000);loadStations();loadResv();
 </script>
 </body>
 </html>

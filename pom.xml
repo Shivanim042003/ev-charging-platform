@@ -135,7 +135,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <environmentVariables>
-                        <JWT_SECRET>test-only-secret-0123456789-0123456789-0123456789</JWT_SECRET>
+                        <APP_JWT_SECRET>test-only-secret-0123456789-0123456789-0123456789</APP_JWT_SECRET>
                     </environmentVariables>
                 </configuration>
             </plugin>
